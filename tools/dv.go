@@ -12,10 +12,35 @@ import (
 )
 
 var dvQueryTool = mcp.NewTool("s1_dv_query",
-	mcp.WithDescription(`Run a Deep Visibility query. Returns queryId when complete. Example query: ProcessName Contains "python"`),
+	mcp.WithDescription(`Run a Deep Visibility query. Returns queryId when complete.
+
+Query syntax:
+  <Field> <Operator> "<Value>" [AND|OR <Field> <Operator> "<Value>" ...]
+
+Operators: Contains, ContainsCIS (case-insensitive), =, !=, In, NotIn, StartsWith, EndsWith, RegExp
+
+Common fields:
+  Process:  ProcessName, SrcProcImagePath, TgtProcImagePath, SrcProcCmdLine, SrcProcUser
+  File:     FilePath, FileFullName, FileSHA256, FileMD5
+  Network:  SrcIP, DstIP, DstPort, DnsRequest, Url
+  Event:    EventType (values: "Process Creation", "File Creation", "File Modification",
+            "File Deletion", "File Rename", "DNS Resolved", "IP Connect",
+            "Behavioral Indicators", "Registry Key Creation", "Registry Value Modified")
+
+Examples:
+  ProcessName Contains "python"
+  SrcProcImagePath Contains "/Downloads/" AND EventType = "Process Creation"
+  DnsRequest Contains "evil.com" OR DstIP = "1.2.3.4"
+
+Limitations:
+  - Do NOT use ObjectType as a field (not supported in DV queries)
+  - Avoid trailing backslashes in values (e.g., "\\Desktop\\" breaks the parser).
+    Use "\\Desktop" or ContainsCIS instead
+  - Complex nested parentheses may fail — prefer flat AND/OR chains
+  - Max query window is 14 days`),
 	mcp.WithString("query",
 		mcp.Required(),
-		mcp.Description(`Deep Visibility query (e.g., ProcessName Contains "python", SrcIP = "10.0.0.1")`),
+		mcp.Description(`Deep Visibility query string. See tool description for syntax and valid fields.`),
 	),
 	mcp.WithString("fromDate",
 		mcp.Required(),
@@ -88,6 +113,26 @@ func summarizeEvent(e map[string]any) string {
 	return fmt.Sprintf("- %s | %s | %s | %s%s", eventType, agent, process, timeStr, details)
 }
 
+// invalidDVFields lists field names that are commonly confused with valid DV fields.
+var invalidDVFields = []string{"ObjectType", "ObjectName"}
+
+// validateDVQuery checks for common query mistakes before sending to the API.
+func validateDVQuery(query string) error {
+	for _, field := range invalidDVFields {
+		// Check for "FieldName <operator>" pattern (field used as a query field)
+		if strings.Contains(query, field+" ") {
+			return fmt.Errorf("%q is not a valid Deep Visibility field. Use EventType to filter by event type, or SrcProcImagePath / ProcessName for process filtering", field)
+		}
+	}
+
+	// Check for trailing backslash before closing quote (breaks S1 parser)
+	if strings.Contains(query, `\"`) {
+		return fmt.Errorf("query contains backslash-quote sequence which will break the S1 parser. Avoid trailing backslashes in quoted values")
+	}
+
+	return nil
+}
+
 func handleDVQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	query, err := req.RequireString("query")
 	if err != nil {
@@ -100,6 +145,10 @@ func handleDVQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolR
 	toDate, err := req.RequireString("toDate")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	if err := validateDVQuery(query); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Invalid query: %v", err)), nil
 	}
 
 	siteIDs := req.GetStringSlice("siteIds", nil)

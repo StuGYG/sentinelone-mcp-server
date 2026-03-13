@@ -67,10 +67,31 @@ func doRequest(method, endpoint string, body any) ([]byte, error) {
 	}
 
 	if resp.StatusCode >= 400 {
+		if detail := extractAPIError(data); detail != "" {
+			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, sanitize(detail))
+		}
 		return nil, fmt.Errorf("HTTP %d: %s - %s", resp.StatusCode, resp.Status, sanitize(string(data)))
 	}
 
 	return data, nil
+}
+
+// extractAPIError pulls the human-readable detail from S1's error JSON.
+// S1 errors look like: {"errors":[{"code":4000040,"detail":"Bad Request - could not parse query","title":"Bad Request"}]}
+func extractAPIError(body []byte) string {
+	var parsed struct {
+		Errors []struct {
+			Detail string `json:"detail"`
+			Title  string `json:"title"`
+		} `json:"errors"`
+	}
+	if json.Unmarshal(body, &parsed) != nil || len(parsed.Errors) == 0 {
+		return ""
+	}
+	if parsed.Errors[0].Detail != "" {
+		return parsed.Errors[0].Detail
+	}
+	return parsed.Errors[0].Title
 }
 
 func sanitize(s string) string {
