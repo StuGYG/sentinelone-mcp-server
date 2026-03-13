@@ -51,7 +51,8 @@ Limitations:
   - Do NOT use ObjectType as a field (not supported in DV queries)
   - Avoid trailing backslashes in values (e.g., "\\Desktop\\" breaks the parser).
     Use "\\Desktop" or ContainsCIS instead
-  - Complex nested parentheses may fail — prefer flat AND/OR chains
+  - Use parentheses to group when mixing AND/OR: A AND (B OR C OR D)
+  - Deeply nested parentheses may fail — keep grouping to one level
   - Max query window is 14 days`),
 	mcp.WithString("query",
 		mcp.Required(),
@@ -150,11 +151,34 @@ func validateDVQuery(query string) (string, error) {
 		query = strings.ReplaceAll(query, `\"`, `"`)
 	}
 
-	// Check for mixed AND/OR without parentheses (S1 parser can't handle precedence)
-	hasAND := strings.Contains(strings.ToUpper(query), " AND ")
-	hasOR := strings.Contains(strings.ToUpper(query), " OR ")
-	if hasAND && hasOR {
-		return "", fmt.Errorf("query mixes AND and OR operators, which the S1 parser cannot handle without parentheses. Split into separate queries or use only AND or only OR in a single query")
+	// Check for mixed AND/OR at the top level (outside parentheses).
+	// S1 supports parenthesized grouping like "A AND (B OR C)", but cannot
+	// handle ambiguous "A AND B OR C" without grouping.
+	upper := strings.ToUpper(query)
+	depth := 0
+	hasTopAND := false
+	hasTopOR := false
+	for i := 0; i < len(upper); i++ {
+		switch upper[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 {
+				if i+5 <= len(upper) && upper[i:i+5] == " AND " {
+					hasTopAND = true
+				}
+				if i+4 <= len(upper) && upper[i:i+4] == " OR " {
+					hasTopOR = true
+				}
+			}
+		}
+	}
+	if hasTopAND && hasTopOR {
+		return "", fmt.Errorf("query mixes AND and OR at the top level. Group conditions with parentheses, e.g. A AND (B OR C), or split into separate queries")
 	}
 
 	return query, nil
