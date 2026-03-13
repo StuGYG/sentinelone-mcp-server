@@ -1,8 +1,5 @@
-# Dependencies
-node_modules/
-
-# Build output
-dist/
+# Binary
+sentinelone-mcp-server
 
 # Environment files (contain secrets)
 .env
@@ -19,10 +16,6 @@ Thumbs.db
 
 # Logs
 *.log
-npm-debug.log*
-
-# TypeScript cache
-*.tsbuildinfo
 
 # Claude Code
 .claude/

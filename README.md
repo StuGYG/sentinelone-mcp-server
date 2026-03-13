@@ -1,6 +1,6 @@
 # sentinelone-mcp-server
 
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.4+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/c0tton-fluff/sentinelone-mcp-server)](https://github.com/c0tton-fluff/sentinelone-mcp-server/releases)
 
@@ -14,13 +14,14 @@ MCP server for [SentinelOne](https://www.sentinelone.com/) integration. Enables 
 - **Hash intelligence** - SHA1/SHA256 reputation lookups
 - **Deep Visibility** - Run threat hunting queries with automatic polling and pagination
 - **Error sanitization** - API keys are redacted from all error messages
+- **Single binary** - No runtime dependencies, just copy and run
 
 ## Installation
 
 ```bash
 git clone https://github.com/c0tton-fluff/sentinelone-mcp-server.git
 cd sentinelone-mcp-server
-npm install && npm run build
+go build -o sentinelone-mcp-server .
 ```
 
 ## Quick Start
@@ -37,8 +38,7 @@ Add to `~/.mcp.json`:
 {
   "mcpServers": {
     "sentinelone": {
-      "command": "node",
-      "args": ["/path/to/sentinelone-mcp-server/dist/index.js"],
+      "command": "/path/to/sentinelone-mcp-server",
       "env": {
         "SENTINELONE_API_KEY": "your_api_token_here",
         "SENTINELONE_API_BASE": "https://your-tenant.sentinelone.net"
@@ -183,7 +183,7 @@ Add to `~/.mcp.json`:
 | HTTP 401 | API token expired or invalid - regenerate in S1 console |
 | HTTP 403 | Token lacks permissions for this endpoint |
 | Request timeout | S1 API took >30s - try narrowing your query filters |
-| Tools not appearing | Verify path in `~/.mcp.json`, restart Claude Code |
+| Tools not appearing | Verify binary path in `~/.mcp.json`, restart Claude Code |
 
 Check MCP logs: `~/.cache/claude-cli-nodejs/*/mcp-logs-sentinelone/`
 

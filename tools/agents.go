@@ -1,0 +1,221 @@
+package tools
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+
+	"github.com/c0tton-fluff/sentinelone-mcp-server/client"
+	"github.com/mark3labs/mcp-go/mcp"
+)
+
+var listAgentsTool = mcp.NewTool("s1_list_agents",
+	mcp.WithDescription("List SentinelOne agents with optional filters"),
+	mcp.WithString("computerName",
+		mcp.Description("Search by computer name (partial match)"),
+	),
+	mcp.WithNumber("limit",
+		mcp.Description("Max results (default 10, max 50)"),
+	),
+	mcp.WithArray("osTypes",
+		mcp.Description("Filter by OS: windows, macos, linux"),
+		mcp.Items(map[string]any{"type": "string"}),
+	),
+	mcp.WithBoolean("isActive",
+		mcp.Description("Filter by active status"),
+	),
+	mcp.WithBoolean("isInfected",
+		mcp.Description("Filter by infected status"),
+	),
+	mcp.WithArray("networkStatuses",
+		mcp.Description("Filter: connected, disconnected"),
+		mcp.Items(map[string]any{"type": "string"}),
+	),
+)
+
+var getAgentTool = mcp.NewTool("s1_get_agent",
+	mcp.WithDescription("Get a specific SentinelOne agent by ID"),
+	mcp.WithString("agentId",
+		mcp.Required(),
+		mcp.Description("The agent ID to retrieve"),
+	),
+)
+
+var isolateAgentTool = mcp.NewTool("s1_isolate_agent",
+	mcp.WithDescription("Network isolate an agent (disconnect from network while maintaining S1 communication)"),
+	mcp.WithString("agentId",
+		mcp.Required(),
+		mcp.Description("The agent ID to network isolate"),
+	),
+)
+
+var reconnectAgentTool = mcp.NewTool("s1_reconnect_agent",
+	mcp.WithDescription("Remove network isolation from an agent"),
+	mcp.WithString("agentId",
+		mcp.Required(),
+		mcp.Description("The agent ID to reconnect"),
+	),
+)
+
+func summarizeAgent(a map[string]any) string {
+	name := fallback(getStr(a, "computerName"), "Unknown")
+	osInfo := fallback(getStr(a, "osName"), fallback(getStr(a, "osType"), "Unknown"))
+	status := fallback(getStr(a, "networkStatus"), "unknown")
+	infected := "clean"
+	if getBool(a, "infected") {
+		infected = "INFECTED"
+	}
+	lastActive := "unknown"
+	if d := getStr(a, "lastActiveDate"); d != "" {
+		lastActive = formatTimeAgo(d)
+	}
+	user := fallback(getStr(a, "lastLoggedInUserName"), "unknown")
+	id := getStr(a, "id")
+	ip := fallback(getStr(a, "externalIp"), fallback(getStr(a, "lastIpToMgmt"), "N/A"))
+
+	return fmt.Sprintf("- %s | %s | %s | %s | %s\n  ID: %s | User: %s | IP: %s",
+		name, osInfo, status, infected, lastActive, id, user, ip)
+}
+
+func handleListAgents(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	limit := int(req.GetFloat("limit", 10))
+	if limit < 1 || limit > 50 {
+		limit = 10
+	}
+
+	q := url.Values{}
+	q.Set("limit", strconv.Itoa(limit))
+
+	if v := req.GetString("computerName", ""); v != "" {
+		q.Set("computerName__contains", v)
+	}
+	if v := req.GetStringSlice("osTypes", nil); len(v) > 0 {
+		q.Set("osTypes", strings.Join(v, ","))
+	}
+	if v := req.GetStringSlice("networkStatuses", nil); len(v) > 0 {
+		q.Set("networkStatuses", strings.Join(v, ","))
+	}
+
+	// Boolean filters: only set when explicitly provided
+	args := req.GetArguments()
+	if v, ok := args["isActive"].(bool); ok {
+		q.Set("isActive", strconv.FormatBool(v))
+	}
+	if v, ok := args["isInfected"].(bool); ok {
+		q.Set("isInfected", strconv.FormatBool(v))
+	}
+
+	result, err := client.ListAgents(q)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+	}
+
+	if len(result.Data) == 0 {
+		return mcp.NewToolResultText("No agents found matching criteria."), nil
+	}
+
+	lines := make([]string, len(result.Data))
+	for i, a := range result.Data {
+		lines[i] = summarizeAgent(a)
+	}
+
+	text := fmt.Sprintf("Found %d agent(s):\n\n%s", len(result.Data), strings.Join(lines, "\n\n"))
+	return mcp.NewToolResultText(text), nil
+}
+
+func handleGetAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	agentID, err := req.RequireString("agentId")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	result, err := client.GetAgent(agentID)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+	}
+
+	if len(result.Data) == 0 {
+		return mcp.NewToolResultError(fmt.Sprintf("Agent %s not found", agentID)), nil
+	}
+
+	a := result.Data[0]
+	infectedStr := "No"
+	if getBool(a, "infected") {
+		infectedStr = "YES"
+	}
+	activeStr := "No"
+	if getBool(a, "isActive") {
+		activeStr = "Yes"
+	}
+
+	text := fmt.Sprintf(`Agent Details:
+---
+Computer: %s
+OS: %s %s
+Status: %s
+Infected: %s
+Active: %s
+---
+ID: %s
+UUID: %s
+Domain: %s
+Site: %s
+Group: %s
+---
+Last Active: %s
+User: %s
+External IP: %s
+Agent Version: %s`,
+		fallback(getStr(a, "computerName"), "Unknown"),
+		fallback(getStr(a, "osName"), "Unknown"),
+		getStr(a, "osRevision"),
+		fallback(getStr(a, "networkStatus"), "Unknown"),
+		infectedStr,
+		activeStr,
+		getStr(a, "id"),
+		fallback(getStr(a, "uuid"), "N/A"),
+		fallback(getStr(a, "domain"), "N/A"),
+		fallback(getStr(a, "siteName"), "N/A"),
+		fallback(getStr(a, "groupName"), "N/A"),
+		fallback(getStr(a, "lastActiveDate"), "Unknown"),
+		fallback(getStr(a, "lastLoggedInUserName"), "Unknown"),
+		fallback(getStr(a, "externalIp"), "N/A"),
+		fallback(getStr(a, "agentVersion"), "N/A"),
+	)
+
+	return mcp.NewToolResultText(text), nil
+}
+
+func handleIsolateAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	agentID, err := req.RequireString("agentId")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	affected, err := client.IsolateAgent(agentID)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(
+		fmt.Sprintf("Done: Agent %s isolated. Affected: %d", agentID, affected),
+	), nil
+}
+
+func handleReconnectAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	agentID, err := req.RequireString("agentId")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	affected, err := client.ReconnectAgent(agentID)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(
+		fmt.Sprintf("Done: Agent %s reconnected. Affected: %d", agentID, affected),
+	), nil
+}
