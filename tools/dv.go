@@ -25,16 +25,24 @@ Operators: Contains, Contains Anycase (case-insensitive), ContainsCIS (alias),
             =, !=, In, In Anycase, In Contains Anycase, NotIn, StartsWith, EndsWith, RegExp
 
 Common fields:
-  Process:  ProcessName, SrcProcImagePath, TgtProcImagePath, SrcProcCmdLine, SrcProcUser
+  Source process (the process performing the action):
+    SrcProcName, SrcProcImagePath, SrcProcCmdLine, SrcProcUser
+  Target process (the process being created/acted upon):
+    TgtProcName, TgtProcImagePath, TgtProcCmdLine
   File:     FilePath, FileFullName, FileSHA256, FileMD5
-  Network:  SrcIP, DstIP, DstPort, DnsRequest, Url
+  Network:  SrcIP, DstIP, DstPort, DnsRequest, DnsResponse, Url
   Event:    EventType (values: "Process Creation", "File Creation", "File Modification",
             "File Deletion", "File Rename", "DNS Resolved", "IP Connect",
             "Behavioral Indicators", "Registry Key Creation", "Registry Value Modified")
 
+Additional syntax:
+  - "not" prefix negates a condition: not TgtProcName In Anycase ("wermgr.exe")
+  - "Anycase" suffix for case-insensitive: Contains Anycase, In Anycase
+  - Operators are case-insensitive: and/And/AND all work
+
 Examples:
-  ProcessName Contains "python"
-  SrcProcImagePath Contains "/Downloads/" AND EventType = "Process Creation"
+  TgtProcImagePath ContainsCIS "/usr/bin/security" AND EventType = "Process Creation"
+  SrcProcName In Anycase ("w3wp.exe") AND TgtProcCmdLine Contains Anycase "cmd"
   DnsRequest Contains "evil.com" OR DstIP = "1.2.3.4"
 
 Query strategy:
@@ -44,9 +52,9 @@ Query strategy:
     Good: SrcProcImagePath Contains "/tmp/" OR SrcProcImagePath Contains "/Downloads/" OR SrcProcImagePath Contains "/Desktop/"
   - Use AND to narrow broad queries (e.g., add EventType = "Process Creation")
   - Use In/NotIn for matching against a list of values:
-    ProcessName In ("cmd.exe","powershell.exe","pwsh.exe")
+    TgtProcName In Anycase ("cmd.exe","powershell.exe","pwsh.exe")
   - For exclusions, prefer NotIn over multiple != conditions:
-    ProcessName NotIn ("chrome.exe","bash","node","svchost.exe")
+    TgtProcName NotIn ("chrome.exe","bash","node","svchost.exe")
 
 Limitations:
   - Do NOT use ObjectType as a field (not supported in DV queries)
