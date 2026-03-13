@@ -62,6 +62,7 @@ func handleListAlerts(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 	cursor := ""
 	for {
 		result, err := client.QueryAlerts(
+			ctx,
 			pageSize,
 			cursor,
 			req.GetString("severity", ""),

@@ -94,7 +94,7 @@ func handleListThreats(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 
 	var allThreats []map[string]any
 	for {
-		result, err := client.ListThreats(q)
+		result, err := client.ListThreats(ctx, q)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
@@ -128,7 +128,7 @@ func handleGetThreat(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToo
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	result, err := client.GetThreat(threatID)
+	result, err := client.GetThreat(ctx, threatID)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 	}
@@ -191,7 +191,7 @@ func handleMitigateThreat(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	affected, err := client.MitigateThreat(threatID, action)
+	affected, err := client.MitigateThreat(ctx, threatID, action)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 	}

@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,7 +38,7 @@ type DVStatus struct {
 
 const maxRetries = 5
 
-func doRequest(method, endpoint string, body any) ([]byte, error) {
+func doRequest(ctx context.Context, method, endpoint string, body any) ([]byte, error) {
 	cfg := config.Get()
 	u := cfg.APIBase + "/web/api/v2.1" + endpoint
 
@@ -58,7 +59,7 @@ func doRequest(method, endpoint string, body any) ([]byte, error) {
 			reqBody = bytes.NewReader(bodyBytes)
 		}
 
-		req, err := http.NewRequest(method, u, reqBody)
+		req, err := http.NewRequestWithContext(ctx, method, u, reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("create request: %w", err)
 		}
@@ -99,7 +100,7 @@ func doRequest(method, endpoint string, body any) ([]byte, error) {
 		return data, nil
 	}
 
-	// Unreachable — the final attempt always returns above — but keeps the compiler happy.
+	// Unreachable -- the final attempt always returns above -- but keeps the compiler happy.
 	return nil, fmt.Errorf("request failed after %d retries", maxRetries)
 }
 
@@ -126,8 +127,8 @@ func sanitize(s string) string {
 	return strings.ReplaceAll(s, cfg.APIKey, "[REDACTED]")
 }
 
-func doGet(endpoint string) (*PaginatedResponse, error) {
-	data, err := doRequest("GET", endpoint, nil)
+func doGet(ctx context.Context, endpoint string) (*PaginatedResponse, error) {
+	data, err := doRequest(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -138,11 +139,11 @@ func doGet(endpoint string) (*PaginatedResponse, error) {
 	return &resp, nil
 }
 
-func doFilterPost(endpoint string, ids []string) (int, error) {
+func doFilterPost(ctx context.Context, endpoint string, ids []string) (int, error) {
 	body := map[string]any{
 		"filter": map[string]any{"ids": ids},
 	}
-	data, err := doRequest("POST", endpoint, body)
+	data, err := doRequest(ctx, "POST", endpoint, body)
 	if err != nil {
 		return 0, err
 	}
@@ -159,47 +160,47 @@ func doFilterPost(endpoint string, ids []string) (int, error) {
 
 // -- Threats --
 
-func ListThreats(q url.Values) (*PaginatedResponse, error) {
+func ListThreats(ctx context.Context, q url.Values) (*PaginatedResponse, error) {
 	endpoint := "/threats"
 	if qs := q.Encode(); qs != "" {
 		endpoint += "?" + qs
 	}
-	return doGet(endpoint)
+	return doGet(ctx, endpoint)
 }
 
-func GetThreat(id string) (*PaginatedResponse, error) {
-	return doGet("/threats?" + url.Values{"ids": {id}}.Encode())
+func GetThreat(ctx context.Context, id string) (*PaginatedResponse, error) {
+	return doGet(ctx, "/threats?"+url.Values{"ids": {id}}.Encode())
 }
 
-func MitigateThreat(id, action string) (int, error) {
-	return doFilterPost("/threats/mitigate/"+url.PathEscape(action), []string{id})
+func MitigateThreat(ctx context.Context, id, action string) (int, error) {
+	return doFilterPost(ctx, "/threats/mitigate/"+url.PathEscape(action), []string{id})
 }
 
 // -- Agents --
 
-func ListAgents(q url.Values) (*PaginatedResponse, error) {
+func ListAgents(ctx context.Context, q url.Values) (*PaginatedResponse, error) {
 	endpoint := "/agents"
 	if qs := q.Encode(); qs != "" {
 		endpoint += "?" + qs
 	}
-	return doGet(endpoint)
+	return doGet(ctx, endpoint)
 }
 
-func GetAgent(id string) (*PaginatedResponse, error) {
-	return doGet("/agents?" + url.Values{"ids": {id}}.Encode())
+func GetAgent(ctx context.Context, id string) (*PaginatedResponse, error) {
+	return doGet(ctx, "/agents?"+url.Values{"ids": {id}}.Encode())
 }
 
-func IsolateAgent(id string) (int, error) {
-	return doFilterPost("/agents/actions/disconnect", []string{id})
+func IsolateAgent(ctx context.Context, id string) (int, error) {
+	return doFilterPost(ctx, "/agents/actions/disconnect", []string{id})
 }
 
-func ReconnectAgent(id string) (int, error) {
-	return doFilterPost("/agents/actions/connect", []string{id})
+func ReconnectAgent(ctx context.Context, id string) (int, error) {
+	return doFilterPost(ctx, "/agents/actions/connect", []string{id})
 }
 
 // -- Deep Visibility --
 
-func CreateDVQuery(query, fromDate, toDate string, siteIDs, groupIDs, accountIDs []string) (string, error) {
+func CreateDVQuery(ctx context.Context, query, fromDate, toDate string, siteIDs, groupIDs, accountIDs []string) (string, error) {
 	body := map[string]any{
 		"query":    query,
 		"fromDate": fromDate,
@@ -215,7 +216,7 @@ func CreateDVQuery(query, fromDate, toDate string, siteIDs, groupIDs, accountIDs
 		body["accountIds"] = accountIDs
 	}
 
-	data, err := doRequest("POST", "/dv/init-query", body)
+	data, err := doRequest(ctx, "POST", "/dv/init-query", body)
 	if err != nil {
 		return "", err
 	}
@@ -231,8 +232,8 @@ func CreateDVQuery(query, fromDate, toDate string, siteIDs, groupIDs, accountIDs
 	return resp.Data.QueryID, nil
 }
 
-func GetDVQueryStatus(queryID string) (*DVStatus, error) {
-	data, err := doRequest("GET", "/dv/query-status?"+url.Values{"queryId": {queryID}}.Encode(), nil)
+func GetDVQueryStatus(ctx context.Context, queryID string) (*DVStatus, error) {
+	data, err := doRequest(ctx, "GET", "/dv/query-status?"+url.Values{"queryId": {queryID}}.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +246,7 @@ func GetDVQueryStatus(queryID string) (*DVStatus, error) {
 	return &resp.Data, nil
 }
 
-func GetDVEvents(queryID string, limit int, cursor string) (*PaginatedResponse, error) {
+func GetDVEvents(ctx context.Context, queryID string, limit int, cursor string) (*PaginatedResponse, error) {
 	q := url.Values{"queryId": {queryID}}
 	if limit > 0 {
 		q.Set("limit", fmt.Sprintf("%d", limit))
@@ -253,5 +254,5 @@ func GetDVEvents(queryID string, limit int, cursor string) (*PaginatedResponse, 
 	if cursor != "" {
 		q.Set("cursor", cursor)
 	}
-	return doGet("/dv/events?" + q.Encode())
+	return doGet(ctx, "/dv/events?"+q.Encode())
 }

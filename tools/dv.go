@@ -156,9 +156,9 @@ func fixBackslashesInDVValues(query string) (string, bool) {
 	isRegExp := false
 
 	for i < len(query) {
-		// Detect RegExp operator immediately before a quoted value.
-		if i+7 <= len(query) && query[i:i+7] == "RegExp " {
-			b.WriteString("RegExp ")
+		// Detect RegExp operator immediately before a quoted value (case-insensitive).
+		if i+7 <= len(query) && strings.EqualFold(query[i:i+7], "RegExp ") {
+			b.WriteString(query[i : i+7])
 			i += 7
 			isRegExp = true
 			continue
@@ -209,14 +209,22 @@ func validateDVQuery(query string) (string, string, error) {
 		warning = "Backslashes were stripped from query values (S1 DV parser does not support them). Use forward slashes or omit path separators for reliable matching."
 	}
 
-	// Check for mixed AND/OR at the top level (outside parentheses).
+	// Check for mixed AND/OR at the top level (outside parentheses and quotes).
 	// S1 supports parenthesized grouping like "A AND (B OR C)", but cannot
 	// handle ambiguous "A AND B OR C" without grouping.
 	upper := strings.ToUpper(query)
 	depth := 0
 	hasTopAND := false
 	hasTopOR := false
+	inQuote := false
 	for i := 0; i < len(upper); i++ {
+		if upper[i] == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if inQuote {
+			continue
+		}
 		switch upper[i] {
 		case '(':
 			depth++
@@ -266,7 +274,7 @@ func handleDVQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolR
 	groupIDs := req.GetStringSlice("groupIds", nil)
 	accountIDs := req.GetStringSlice("accountIds", nil)
 
-	queryID, err := client.CreateDVQuery(query, fromDate, toDate, siteIDs, groupIDs, accountIDs)
+	queryID, err := client.CreateDVQuery(ctx, query, fromDate, toDate, siteIDs, groupIDs, accountIDs)
 	if err != nil {
 		return mcp.NewToolResultError(
 			fmt.Sprintf("Error running Deep Visibility query: %v", err),
@@ -277,7 +285,7 @@ func handleDVQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolR
 	var status *client.DVStatus
 	for i := 0; i < 30; i++ {
 		time.Sleep(1 * time.Second)
-		status, err = client.GetDVQueryStatus(queryID)
+		status, err = client.GetDVQueryStatus(ctx, queryID)
 		if err != nil {
 			return mcp.NewToolResultError(
 				fmt.Sprintf("Error running Deep Visibility query: %v", err),
@@ -334,7 +342,7 @@ func handleDVGetEvents(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 
 	// Wait for query to finish if still running.
 	for i := 0; i < 30; i++ {
-		status, err := client.GetDVQueryStatus(queryID)
+		status, err := client.GetDVQueryStatus(ctx, queryID)
 		if err != nil {
 			return mcp.NewToolResultError(
 				fmt.Sprintf("Error getting Deep Visibility events: %v", err),
@@ -362,7 +370,7 @@ ready:
 	// Fetch events, retrying on 409 (S1 race: status says FINISHED but events not yet available).
 	var result *client.PaginatedResponse
 	for i := 0; i < 5; i++ {
-		result, err = client.GetDVEvents(queryID, limit, "")
+		result, err = client.GetDVEvents(ctx, queryID, limit, "")
 		if err == nil {
 			break
 		}

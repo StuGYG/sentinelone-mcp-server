@@ -109,7 +109,7 @@ func handleListAgents(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 
 	var allAgents []map[string]any
 	for {
-		result, err := client.ListAgents(q)
+		result, err := client.ListAgents(ctx, q)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 		}
@@ -143,7 +143,7 @@ func handleGetAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	result, err := client.GetAgent(agentID)
+	result, err := client.GetAgent(ctx, agentID)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 	}
@@ -206,7 +206,7 @@ func handleIsolateAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.Call
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	affected, err := client.IsolateAgent(agentID)
+	affected, err := client.IsolateAgent(ctx, agentID)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 	}
@@ -222,7 +222,7 @@ func handleReconnectAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	affected, err := client.ReconnectAgent(agentID)
+	affected, err := client.ReconnectAgent(ctx, agentID)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
 	}

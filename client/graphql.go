@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -46,6 +47,7 @@ func normalizeStatus(s string) string {
 }
 
 func QueryAlerts(
+	ctx context.Context,
 	limit int,
 	cursor, severity, analystVerdict, incidentStatus, storylineID string,
 	siteIDs []string,
@@ -122,7 +124,7 @@ func QueryAlerts(
 		"variables": variables,
 	}
 
-	data, err := doRequest("POST", "/unifiedalerts/graphql", body)
+	data, err := doRequest(ctx, "POST", "/unifiedalerts/graphql", body)
 	if err != nil {
 		return nil, err
 	}

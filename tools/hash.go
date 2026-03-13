@@ -80,7 +80,7 @@ func handleHashReputation(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	// Retry on 409 (S1 limits concurrent DV queries per token)
 	var queryID string
 	for attempt := 0; attempt < 6; attempt++ {
-		queryID, err = client.CreateDVQuery(dvQuery, fromDate, toDate, nil, nil, nil)
+		queryID, err = client.CreateDVQuery(ctx, dvQuery, fromDate, toDate, nil, nil, nil)
 		if err == nil {
 			break
 		}
@@ -96,26 +96,31 @@ func handleHashReputation(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 		), nil
 	}
 
-	// Poll for completion
+	// Poll for completion -- only break on known terminal states.
 	var status *client.DVStatus
 	for i := 0; i < 30; i++ {
 		time.Sleep(1 * time.Second)
-		status, err = client.GetDVQueryStatus(queryID)
+		status, err = client.GetDVQueryStatus(ctx, queryID)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Error hunting hash: %v", err)), nil
 		}
-		if status.Status != "RUNNING" {
-			break
+		switch status.Status {
+		case "FINISHED", "FAILED", "CANCELED":
+			goto pollDone
 		}
 	}
+pollDone:
 
-	if status.Status == "FAILED" {
+	switch status.Status {
+	case "FAILED":
 		return mcp.NewToolResultError(
 			fmt.Sprintf("DV hash query failed: %s", fallback(status.ResponseError, "Unknown error")),
 		), nil
-	}
-
-	if status.Status == "RUNNING" {
+	case "CANCELED":
+		return mcp.NewToolResultError("DV hash query was canceled"), nil
+	case "FINISHED":
+		// continue to fetch events below
+	default:
 		return mcp.NewToolResultText(
 			fmt.Sprintf("Query still running after 30s. Use s1_dv_get_events with queryId: %s", queryID),
 		), nil
@@ -124,7 +129,7 @@ func handleHashReputation(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	// Fetch events with 409 retry
 	var events *client.PaginatedResponse
 	for attempt := 0; attempt < 5; attempt++ {
-		events, err = client.GetDVEvents(queryID, 50, "")
+		events, err = client.GetDVEvents(ctx, queryID, 50, "")
 		if err == nil {
 			break
 		}
