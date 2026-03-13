@@ -141,6 +141,13 @@ func validateDVQuery(query string) error {
 		return fmt.Errorf("query contains backslash-quote sequence which will break the S1 parser. Avoid trailing backslashes in quoted values")
 	}
 
+	// Check for mixed AND/OR without parentheses (S1 parser can't handle precedence)
+	hasAND := strings.Contains(strings.ToUpper(query), " AND ")
+	hasOR := strings.Contains(strings.ToUpper(query), " OR ")
+	if hasAND && hasOR {
+		return fmt.Errorf("query mixes AND and OR operators, which the S1 parser cannot handle without parentheses. Split into separate queries or use only AND or only OR in a single query")
+	}
+
 	return nil
 }
 
@@ -173,7 +180,7 @@ func handleDVQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolR
 		), nil
 	}
 
-	// Poll for completion
+	// Poll for completion — only break on known terminal states.
 	var status *client.DVStatus
 	for i := 0; i < 30; i++ {
 		time.Sleep(1 * time.Second)
@@ -183,30 +190,36 @@ func handleDVQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolR
 				fmt.Sprintf("Error running Deep Visibility query: %v", err),
 			), nil
 		}
-		if status.Status != "RUNNING" {
-			break
+		switch status.Status {
+		case "FINISHED", "FAILED", "CANCELED":
+			goto done
 		}
 	}
+done:
 
-	if status.Status == "FAILED" {
+	switch status.Status {
+	case "FAILED":
 		return mcp.NewToolResultError(
 			fmt.Sprintf("Deep Visibility query failed: %s", fallback(status.ResponseError, "Unknown error")),
 		), nil
-	}
-
-	if status.Status == "RUNNING" {
+	case "CANCELED":
+		return mcp.NewToolResultError(
+			fmt.Sprintf("Deep Visibility query was canceled"),
+		), nil
+	case "FINISHED":
+		result := map[string]string{
+			"queryId": queryID,
+			"status":  status.Status,
+			"message": "Query completed. Use s1_dv_get_events to retrieve results.",
+		}
+		b, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(b)), nil
+	default:
 		return mcp.NewToolResultText(
-			fmt.Sprintf("Query still running after 30 seconds. Use s1_dv_get_events with queryId: %s to retrieve results later.", queryID),
+			fmt.Sprintf("Query still running after 30 seconds (status: %s). Use s1_dv_get_events with queryId: %s to retrieve results later.",
+				fallback(status.Status, "unknown"), queryID),
 		), nil
 	}
-
-	result := map[string]string{
-		"queryId": queryID,
-		"status":  status.Status,
-		"message": "Query completed. Use s1_dv_get_events to retrieve results.",
-	}
-	b, _ := json.MarshalIndent(result, "", "  ")
-	return mcp.NewToolResultText(string(b)), nil
 }
 
 func handleDVGetEvents(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -221,31 +234,47 @@ func handleDVGetEvents(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 	}
 	cursor := req.GetString("cursor", "")
 
-	// Check query status first
-	status, err := client.GetDVQueryStatus(queryID)
-	if err != nil {
-		return mcp.NewToolResultError(
-			fmt.Sprintf("Error getting Deep Visibility events: %v", err),
-		), nil
+	// Wait for query to finish if still running.
+	for i := 0; i < 30; i++ {
+		status, err := client.GetDVQueryStatus(queryID)
+		if err != nil {
+			return mcp.NewToolResultError(
+				fmt.Sprintf("Error getting Deep Visibility events: %v", err),
+			), nil
+		}
+		switch status.Status {
+		case "FINISHED":
+			goto ready
+		case "FAILED":
+			return mcp.NewToolResultError(
+				fmt.Sprintf("Query %s failed: %s", queryID, fallback(status.ResponseError, "Unknown error")),
+			), nil
+		case "CANCELED":
+			return mcp.NewToolResultError(
+				fmt.Sprintf("Query %s was canceled", queryID),
+			), nil
+		}
+		time.Sleep(1 * time.Second)
 	}
+	return mcp.NewToolResultText(
+		fmt.Sprintf("Query %s is still running after 30 seconds. Try again later.", queryID),
+	), nil
+ready:
 
-	switch status.Status {
-	case "RUNNING":
-		return mcp.NewToolResultText(
-			fmt.Sprintf("Query %s is still running (%d%% complete). Please wait and try again.",
-				queryID, status.ProgressStatus),
-		), nil
-	case "FAILED":
-		return mcp.NewToolResultError(
-			fmt.Sprintf("Query %s failed: %s", queryID, fallback(status.ResponseError, "Unknown error")),
-		), nil
-	case "CANCELED":
-		return mcp.NewToolResultError(
-			fmt.Sprintf("Query %s was canceled", queryID),
-		), nil
+	// Fetch events, retrying on 409 (S1 race: status says FINISHED but events not yet available).
+	var result *client.PaginatedResponse
+	for i := 0; i < 5; i++ {
+		result, err = client.GetDVEvents(queryID, limit, cursor)
+		if err == nil {
+			break
+		}
+		if !strings.Contains(err.Error(), "409") {
+			return mcp.NewToolResultError(
+				fmt.Sprintf("Error getting Deep Visibility events: %v", err),
+			), nil
+		}
+		time.Sleep(2 * time.Second)
 	}
-
-	result, err := client.GetDVEvents(queryID, limit, cursor)
 	if err != nil {
 		return mcp.NewToolResultError(
 			fmt.Sprintf("Error getting Deep Visibility events: %v", err),
