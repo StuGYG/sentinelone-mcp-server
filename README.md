@@ -22,11 +22,62 @@ go build -o sentinelone-mcp-server .
 
 ### 2. Get your API token
 
+**Recommended -- a Service User** (decoupled from your personal login, independently scoped, revocable without touching your account):
+
+S1 Console > **Settings** > **Users** > **Service Users** > Actions > **Create New Service User**
+
+Set an expiry, and scope it to the narrowest role that covers the tools you plan to use. Read-only is enough for everything except the mitigate/isolate/exclusion/STAR tools.
+
+**Or a personal token** (dies when your account is deactivated or your role changes, and carries your full permissions):
+
 S1 Console > Profile (top right) > **My Profile** > Actions > **API token operations** > **Regenerate API token**
+
+> **The token is displayed once.** Copy it with the console's Copy button rather than selecting the text -- the field is scrollable, and a click-drag can silently grab only the visible portion.
+
+#### Verify the token survived storage
+
+Modern S1 tokens are **ES256 JWTs** several hundred characters long, of the form `header.payload.signature`. Anything that truncates a long string on the way into storage will produce a value that *looks* plausible but fails authentication.
+
+[`examples/store-token.sh`](examples/store-token.sh) does these checks for you and refuses to overwrite a working token with a bad paste. To check by hand:
+
+```bash
+# expect: a length in the hundreds, and exactly 2 dot separators
+printf '%s' "$SENTINELONE_API_KEY" | wc -c
+printf '%s' "$SENTINELONE_API_KEY" | tr -cd '.' | wc -c
+```
+
+Known truncation trap: on macOS, `security add-generic-password -w` with **no value** prompts interactively and cuts the input off at 128 characters. Pass the value instead -- `-w "$(pbpaste | tr -d '\n\r')"` -- and note that Keychain Access.app was removed in macOS 26, so the CLI is the only way to write these items. A trailing newline in the stored value also fails auth, hence the `tr`.
 
 ### 3. Configure your MCP client
 
-Add to `~/.mcp.json`:
+**Recommended: a wrapper script that resolves the token at startup.** Ready-made scripts are in [`examples/`](examples/).
+
+```bash
+# Store the token (reads it from your clipboard -- no arguments, so it never
+# lands in shell history or `ps` output). Validates before writing.
+./examples/store-token.sh
+
+# Store your tenant URL
+security add-generic-password -s sentinelone-mcp -a api-base \
+  -w "https://your-tenant.sentinelone.net"
+```
+
+Then point your client at the wrapper -- no `env` block, no secret in the config file:
+
+```json
+{
+  "mcpServers": {
+    "sentinelone": {
+      "command": "/path/to/sentinelone-mcp-server/examples/run.sh"
+    }
+  }
+}
+```
+
+`run.sh` reads both values from the keychain, rejects a malformed token at startup rather than letting it surface as a confusing HTTP 401, and exec's the server. It's macOS/keychain by default; the footer comment shows the one-line swap for `secret-tool`, `pass`, `op`, or AWS Secrets Manager.
+
+<details>
+<summary><strong>Alternative: token inline in the config (simpler, less safe)</strong></summary>
 
 ```json
 {
@@ -41,6 +92,10 @@ Add to `~/.mcp.json`:
   }
 }
 ```
+
+This writes a live API token in cleartext to a config file that is easy to sync to a dotfiles repo, back up, or share while screen-sharing. It also has no truncation check, so a mangled paste shows up as an authentication failure with no indication of the real cause. Fine for a throwaway or a scoped read-only token you rotate often; the wrapper is better for anything else.
+
+</details>
 
 ### 4. Go
 
@@ -296,11 +351,36 @@ At least one of `name` or `agentName` is required.
 |-------|-----|
 | Configuration error | Ensure `SENTINELONE_API_KEY` and `SENTINELONE_API_BASE` are set |
 | API_BASE must be HTTPS | Use `https://` not `http://` for your tenant URL |
-| HTTP 401 | API token expired or invalid -- regenerate in S1 console |
+| HTTP 401 | Token expired, revoked, **or truncated/malformed** -- check the JWT shape first (see below), then regenerate |
 | HTTP 403 | Token lacks permissions for this endpoint |
 | HTTP 429 | Rate limited -- server retries automatically with backoff |
 | Request timeout | S1 API took >30s -- narrow your query filters |
 | Tools not appearing | Verify binary path in `~/.mcp.json`, restart your MCP client |
+
+### Debugging HTTP 401
+
+S1 returns the **same** error for an expired token and a malformed one:
+
+```json
+{"errors":[{"code":4010010,"detail":null,"title":"Authentication Failed"}]}
+```
+
+So "my token is valid until <date>" and a hard 401 can both be true at once. Rule out corruption before you regenerate:
+
+```bash
+# 1. Is it a well-formed JWT? Expect exactly 2.
+printf '%s' "$SENTINELONE_API_KEY" | tr -cd '.' | wc -c
+
+# 2. Does the header decode? Expect {"kid":"...","alg":"ES256"}
+printf '%s' "$SENTINELONE_API_KEY" | cut -d. -f1 | base64 -d
+
+# 3. Confirm against the API directly, bypassing this server
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: ApiToken $SENTINELONE_API_KEY" \
+  "$SENTINELONE_API_BASE/web/api/v2.1/agents?limit=1"
+```
+
+Fewer than 2 dots means the stored value was truncated on write -- re-store it, don't regenerate. If `curl` also returns 401, the problem is the credential, not this server. A `403` instead means the token is valid but the Service User's role is too narrow for that endpoint.
 
 MCP logs: `~/.cache/claude-cli-nodejs/*/mcp-logs-sentinelone/`
 
