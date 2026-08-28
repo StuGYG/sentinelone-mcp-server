@@ -299,12 +299,12 @@ func (p alertFilterParams) hasFilter() bool {
 
 func (p alertFilterParams) toClientFilter() client.AlertFilter {
 	return client.AlertFilter{
-		Query:            p.Query,
-		RuleNameContains: p.RuleName,
+		Query:             p.Query,
+		RuleNameContains:  p.RuleName,
 		AgentNameContains: p.AgentName,
-		IncidentStatus:   p.IncidentStatus,
-		SiteIDs:          p.SiteIDs,
-		IDs:              p.AlertIDs,
+		IncidentStatus:    p.IncidentStatus,
+		SiteIDs:           p.SiteIDs,
+		IDs:               p.AlertIDs,
 	}
 }
 
@@ -411,10 +411,13 @@ func handleListAlerts(ctx context.Context, args json.RawMessage) ToolResult {
 			return toolError(fmt.Sprintf("Error listing alerts: %v", err))
 		}
 		allAlerts = append(allAlerts, result.Alerts...)
-		if !result.PageInfo.HasNextPage || len(allAlerts) >= p.Limit {
+		next := result.PageInfo.EndCursor
+		// Guard against a misbehaving API: hasNextPage with an empty or
+		// unchanged cursor would otherwise loop forever.
+		if !result.PageInfo.HasNextPage || next == "" || next == cursor || len(allAlerts) >= p.Limit {
 			break
 		}
-		cursor = result.PageInfo.EndCursor
+		cursor = next
 	}
 
 	if len(allAlerts) > p.Limit {
