@@ -595,3 +595,20 @@ func TestSummarizeTimelineEvent_PrimaryMatchesActivity(t *testing.T) {
 		t.Fatalf("expected 1 occurrence of Threat Detected, got %d in %q", count, got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// register.go: DispatchTool panic recovery
+// ---------------------------------------------------------------------------
+
+// Drives a real panic through a real handler: config.Load() is never called
+// in this test binary, so the handler's client call panics in config.Get().
+// Dispatch must contain it and return a tool error, not crash the server.
+func TestDispatchTool_RecoversPanic(t *testing.T) {
+	result := DispatchTool(t.Context(), "s1_list_threats", []byte(`{}`))
+	if !result.IsError {
+		t.Fatal("expected IsError result from panicking handler")
+	}
+	if len(result.Content) == 0 || !strings.Contains(result.Content[0].Text, "internal error in s1_list_threats") {
+		t.Fatalf("unexpected panic result content: %+v", result.Content)
+	}
+}

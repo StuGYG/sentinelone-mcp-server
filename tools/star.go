@@ -90,18 +90,18 @@ Example — detect DNS lookups for a suspicious domain:
 
 func handleCreateSTARRule(ctx context.Context, args json.RawMessage) ToolResult {
 	var p struct {
-		Name               string   `json:"name"`
-		S1QL               string   `json:"s1ql"`
-		Severity           string   `json:"severity"`
-		Description        string   `json:"description"`
-		TreatAsThreat      string   `json:"treatAsThreat"`
-		NetworkQuarantine  bool     `json:"networkQuarantine"`
-		ExpirationMode     string   `json:"expirationMode"`
-		Expiration         string   `json:"expiration"`
-		Status             string   `json:"status"`
-		SiteIDs            []string `json:"siteIds"`
-		AccountIDs         []string `json:"accountIds"`
-		Tenant             bool     `json:"tenant"`
+		Name              string   `json:"name"`
+		S1QL              string   `json:"s1ql"`
+		Severity          string   `json:"severity"`
+		Description       string   `json:"description"`
+		TreatAsThreat     string   `json:"treatAsThreat"`
+		NetworkQuarantine bool     `json:"networkQuarantine"`
+		ExpirationMode    string   `json:"expirationMode"`
+		Expiration        string   `json:"expiration"`
+		Status            string   `json:"status"`
+		SiteIDs           []string `json:"siteIds"`
+		AccountIDs        []string `json:"accountIds"`
+		Tenant            bool     `json:"tenant"`
 	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &p); err != nil {

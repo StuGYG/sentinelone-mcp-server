@@ -248,13 +248,13 @@ func ReconnectAgent(ctx context.Context, id string) (int, error) {
 
 // AlertFilter represents the filter object for cloud-detection alert bulk operations.
 type AlertFilter struct {
-	Query                string   `json:"query,omitempty"`
-	RuleNameContains     []string `json:"ruleName__contains,omitempty"`
-	AgentNameContains    []string `json:"origAgentName__contains,omitempty"`
-	IncidentStatus       []string `json:"incidentStatus,omitempty"`
-	AnalystVerdict       []string `json:"analystVerdict,omitempty"`
-	SiteIDs              []string `json:"siteIds,omitempty"`
-	IDs                  []string `json:"ids,omitempty"`
+	Query             string   `json:"query,omitempty"`
+	RuleNameContains  []string `json:"ruleName__contains,omitempty"`
+	AgentNameContains []string `json:"origAgentName__contains,omitempty"`
+	IncidentStatus    []string `json:"incidentStatus,omitempty"`
+	AnalystVerdict    []string `json:"analystVerdict,omitempty"`
+	SiteIDs           []string `json:"siteIds,omitempty"`
+	IDs               []string `json:"ids,omitempty"`
 }
 
 func SetAlertVerdict(ctx context.Context, filter AlertFilter, verdict string) (int, error) {
