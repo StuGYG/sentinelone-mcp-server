@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"runtime/debug"
 )
 
 // AllTools returns all MCP tool definitions.
@@ -34,7 +36,15 @@ func AllTools() []ToolDef {
 }
 
 // DispatchTool routes a tool call to the appropriate handler.
-func DispatchTool(ctx context.Context, name string, args json.RawMessage) ToolResult {
+// A panic in any handler is contained here so it surfaces as a tool error
+// instead of killing the server mid-session.
+func DispatchTool(ctx context.Context, name string, args json.RawMessage) (result ToolResult) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "panic in tool %s: %v\n%s", name, r, debug.Stack())
+			result = toolError(fmt.Sprintf("internal error in %s: %v", name, r))
+		}
+	}()
 	switch name {
 	case "s1_list_threats":
 		return handleListThreats(ctx, args)
